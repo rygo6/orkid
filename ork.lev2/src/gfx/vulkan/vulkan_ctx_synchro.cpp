@@ -202,7 +202,8 @@ void VulkanFenceObject::reset() {
 
 void VulkanFenceObject::wait() {
   logchan_vksynch->log("FENCE: wait: waiting for fence %p", (void*)_vkfence);
-  vkWaitForFences(_ctxVK->_vkdevice, 1, &_vkfence, true, UINT64_MAX);
+  VkResult OK = vkWaitForFences(_ctxVK->_vkdevice, 1, &_vkfence, true, UINT64_MAX);
+  OrkAssert(OK == VK_SUCCESS);
   logchan_vksynch->log("FENCE: wait: fence %p wait complete", (void*)_vkfence);
   for (auto item : _onReached) {
     item();

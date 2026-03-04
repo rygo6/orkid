@@ -11,7 +11,7 @@
 ///////////////////////////////////////////////////////////////////////////////
 namespace ork::lev2::vulkan {
 ///////////////////////////////////////////////////////////////////////////////
-static auto logchan_swapchain = logger()->configureChannel("VKSWAP", fvec3(0.5, 0.5, 0.5), false);
+static auto logchan_swapchain = logger()->configureChannel("VKSWAP", fvec3(0.5, 0.5, 0.5), true);
 
 VkSwapChain::VkSwapChain(vkcontext_rawptr_t ctxVK)
     : _contextVK(ctxVK) {
@@ -50,7 +50,6 @@ void VkSwapChain::_buildup() {
       _imageAcquiredSemaphores.push_back(bin_sema_imgacq);
       _renderCompleteSemaphores.push_back(bin_sema_rencom);
       _frameFences.push_back(fence);
-      fence->reset();
     }
   } else {
     logchan_swapchain->log("_buildup: Reusing existing synchronization objects");
@@ -321,7 +320,7 @@ void VkSwapChain::_teardown() {
     }
 
   // Wait ONLY for in-flight fences - do NOT reset them!
-  // Let waitPresentFrame() handle fence resets before the next submit
+  // Let waitFrame() handle fence resets before the next submit
   logchan_swapchain->log("_teardown: Waiting for in-flight fences");
 
   // Collect fences that are in-flight (NOT_READY = submitted but not signaled yet)
@@ -371,7 +370,7 @@ void VkSwapChain::_teardown() {
     }
   }
 
-  // NO fence resets - let waitPresentFrame() handle that before next submit
+  // NO fence resets - let waitFrame() handle that before next submit
   // The fences guaranteed swapchain images aren't in use
 
   if (_vkSwapChain != VK_NULL_HANDLE) {
@@ -537,6 +536,7 @@ void VkSwapChain::enqueueFrame(vkcontext_rawptr_t ctxVK) {
     if(0)logchan_swapchain->log("enqueueFrame: queue submit complete with fence %p", (void*)fence->_vkfence);
     }
   } else {
+    OrkAssert(false);
     OrkProfilerSampleScope(CHANNEL_MAIN, "vk:enqueue_frame_submit");
     logchan_swapchain->log("enqueueFrame: WARNING - submitting without fence (sub_index %zu >= fence count %zu)", sub_index, _frameFences.size());
     vkQueueSubmit(ctxVK->_vkqueue_graphics, 1, &SI, VK_NULL_HANDLE);
@@ -699,59 +699,31 @@ void VkSwapChain::enqueuePresentFrame(vkcontext_rawptr_t ctxVK) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void VkSwapChain::waitPresentFrame(vkcontext_rawptr_t ctxVK) {
+void VkSwapChain::incrementFrame() {
+  _currentFrame++;
+  if(0)logchan_swapchain->log("incremented to frame %zu", _currentFrame, _currentFrame + 1);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+void VkSwapChain::waitFrame(vkcontext_rawptr_t ctxVK) {
   size_t sub_index = subIndex();
   
   // DEBUG: Log frame waiting
-  if(0)logchan_swapchain->log("waitPresentFrame: frame %zu, sub_index %zu", _currentFrame, sub_index);
+  if(0)logchan_swapchain->log("waitFrame: frame %zu, sub_index %zu", _currentFrame, sub_index);
   
   // Wait for the current frame's fence to ensure rendering is complete
+  // TODO there should be a path with no fence
   auto& fence = _frameFences[sub_index];
-
   if (fence) {
-    // Check if fence has been submitted (signaled or in-flight)
-    VkResult fence_status = vkGetFenceStatus(ctxVK->_vkdevice, fence->_vkfence);
-
-    if (fence_status == VK_SUCCESS) {
-      // Fence is already signaled - previous frame work is complete
-      // Just reset it, no need to wait (wait would return immediately anyway)
-      if(0)logchan_swapchain->log("waitPresentFrame: fence %p already signaled, resetting", (void*)fence->_vkfence);
-      fence->reset();
-    } else if (fence_status == VK_NOT_READY) {
-      // Fence is not yet signaled - could be in-flight OR never submitted (after reinit)
-      // Only skip wait if we're in the first MAX_FRAMES_IN_FLIGHT frames after reinit
-      // where fences haven't been cycled through yet
-      bool early_after_reinit = (_currentFrame < MAX_FRAMES_IN_FLIGHT);
-
-      if (early_after_reinit) {
-        // Fence was likely never submitted yet, safe to skip wait
-        if(0)logchan_swapchain->log("waitPresentFrame: fence %p not ready (early frame %zu), skipping wait",
-                              (void*)fence->_vkfence, _currentFrame);
-      } else {
-        // Fence should have been submitted MAX_FRAMES_IN_FLIGHT frames ago
-        // It's in-flight, wait for it
-        if(0)logchan_swapchain->log("waitPresentFrame: fence %p in-flight, waiting", (void*)fence->_vkfence);
-        fence->wait();
-        fence->reset();
-      }
-    } else {
-      // VK_ERROR_DEVICE_LOST (-4) or other error
-      logchan_swapchain->log("waitPresentFrame: ERROR - fence %p in error state: %d (device lost?)",
-                            (void*)fence->_vkfence, fence_status);
-      // Device is lost, cannot recover - this is fatal
-      // Log it but don't try to reset (would fail anyway)
-    }
+    fence->wait();    
   } else {
-    logchan_swapchain->log("waitPresentFrame: WARNING - no fence for sub_index %zu", sub_index);
+    logchan_swapchain->log("waitFrame: WARNING - no fence for sub_index %zu", sub_index);
   }
-  
-  // DEBUG: Log frame completion and increment
-  if(0)logchan_swapchain->log("waitPresentFrame: frame %zu complete, incrementing to frame %zu", 
-                         _currentFrame, _currentFrame + 1);
-  _currentFrame++;
-  
-  if(0)logchan_swapchain->log("waitPresentFrame: COMPLETE - frame counter now %zu", _currentFrame);
+
+  if(0)logchan_swapchain->log("waitFrame: COMPLETE - frame counter now %zu", _currentFrame);
 }
+
 
 ///////////////////////////////////////////////////////////////////////////////
 } // namespace ork::lev2::vulkan

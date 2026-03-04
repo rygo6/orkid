@@ -119,7 +119,8 @@ struct VkSwapChain {
   VkResult acquireImage(vkcontext_rawptr_t ctxVK);
   void enqueueFrame(vkcontext_rawptr_t ctxVK);
   void enqueuePresentFrame(vkcontext_rawptr_t ctxVK);
-  void waitPresentFrame(vkcontext_rawptr_t ctxVK);
+  void incrementFrame();
+  void waitFrame(vkcontext_rawptr_t ctxVK);
   size_t subIndex() const; // Which frame-in-flight we're on (0 or 1 if MAX=2)
 
   void _submitFrameWithSemaphores(vkcontext_rawptr_t ctxVK);

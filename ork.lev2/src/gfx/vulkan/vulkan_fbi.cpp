@@ -92,7 +92,7 @@ void VkFrameBufferInterface::_doBeginFrame() {
 ///////////////////////////////////////////////////////
 
 void VkFrameBufferInterface::_doEndFrame() {
-  // NOTE: DRM's waitPresentFrame is called in _doSubmitPrimaryCommandBuffer,
+  // NOTE: DRM's waitFrame is called in _doSubmitPrimaryCommandBuffer,
   // not here, to match GLFW flow
 }
 

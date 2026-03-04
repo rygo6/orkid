@@ -518,22 +518,29 @@ struct VkComputeInterface : public ComputeInterface {
 struct VkProfilerChannel final : ProfilerChannel {
   static constexpr size_t MAX_GPU_PERF_QUERIES = 64;
 
-  VkDevice        _device     = VK_NULL_HANDLE;
-  VkCommandBuffer _cmdbuf     = VK_NULL_HANDLE;
-  VkQueryPool     _query_pool = VK_NULL_HANDLE;
+  VkDevice _device = VK_NULL_HANDLE;
+  float   _timestampPeriod  = 1.0f;
 
-  struct VkTimespan {
-    SampleProfilerSeries* series = nullptr;
-    int begin_total_query = -1;
-    int begin_query = -1;
-    int end_query   = -1;
+  struct QueryBuffer {
+    VkCommandBuffer _cmdbuf = VK_NULL_HANDLE;
+    VkQueryPool _query_pool = VK_NULL_HANDLE;
+
+    struct VkTimespan {
+      SampleProfilerSeries* series = nullptr;
+      int begin_total_query = -1;
+      int begin_query = -1;
+      int end_query   = -1;
+    };
+    std::vector<VkTimespan> _vk_spans{};
+    std::vector<VkTimespan> _vk_total_spans{};
+    u32 _query_index = 0;
   };
-  std::stack<VkTimespan>  _vk_span_stack{};
-  std::vector<VkTimespan> _vk_spans{};
-  std::vector<VkTimespan> _vk_total_spans{};
-  u32 _query_index = 0;
-  float _timestampPeriod = 1.0f;
-  std::vector<u64> _timestamps{};
+
+  int _current_buffer_index = 0;
+  int _prev_buffer_index    = 0;
+  std::array<QueryBuffer, VkSwapChain::MAX_FRAMES_IN_FLIGHT> _buffers;
+  std::stack<QueryBuffer::VkTimespan> _vk_span_stack{}; // shared, always empty at frame boundaries
+  std::vector<u64> _timestamps{};                       // shared readback buffer, reused each frameEnd
 
   using ProfilerChannel::ProfilerChannel;
 
@@ -545,8 +552,9 @@ struct VkProfilerChannel final : ProfilerChannel {
     VkDevice        device;
     float           timestamp_period;
     VkCommandBuffer cmdbuf;
+    int             buffer_index;
   };
-  void frameBegin(BeginParams params);
+  void frameBegin(const BeginParams& params);
   void frameEnd() override;
 
   void sampleBegin(SampleProfilerSeries* series) override;
