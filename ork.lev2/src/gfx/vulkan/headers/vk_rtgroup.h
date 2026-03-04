@@ -142,7 +142,7 @@ std::vector<vkimageobj_ptr_t> _swapChainImages;
   std::vector<uint64_t> _allWaitValues;
   std::vector<VkPipelineStageFlags> _allWaitStages;
 
-  size_t _currentFrame = 0; // Which frame-in-flight we're on (0 or 1 if MAX=2)
+  u64 _currentFrame = 0; // Which frame-in-flight we're on (0 or 1 if MAX=2)
   int _width = 0;
   int _height = 0;
   uint32_t _curSwapWriteImage = 0xffffffff;
