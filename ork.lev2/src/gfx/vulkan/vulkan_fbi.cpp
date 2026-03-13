@@ -69,18 +69,30 @@ void VkFrameBufferInterface::_setScissor(int iX, int iY, int iW, int iH) {
 void VkFrameBufferInterface::_doBeginFrame() {
   static int frame_log_count = 0;
 
-  if (_swapchain) {
-    _swapchain->_update();
-  }
+  switch (_mode) {
+    case VkOutputMode::GFX_PRESENT_SWAP:
+      _swapchain->_update();
+      break;
+    case VkOutputMode::GFX_PRESENT_DRM:
 #if defined(__linux__)
-  else if (_swapchain_drm) {
-    if (frame_log_count < 10) {
-      logchan_fbi->log("DRM: _doBeginFrame[%d] - calling acquireImage", frame_log_count);
-    }
-    _swapchain_drm->acquireImage(_contextVK);
-    // NOTE: enqueueFrame() called later from vulkan_ctx.cpp after rendering
-  }
+      if (frame_log_count < 10) {
+        logchan_fbi->log("DRM: _doBeginFrame[%d] - calling acquireImage", frame_log_count);
+      }
+      _swapchain_drm->acquireImage(_contextVK);
+      // NOTE: enqueueFrame() called later from vulkan_ctx.cpp after rendering
 #endif
+      break;
+    case VkOutputMode::GFX_REPROJECT_SWAP:
+    case VkOutputMode::GFX_REPROJECT_DRM:
+    case VkOutputMode::IPC_REPROJECT_SWAP:
+    case VkOutputMode::IPC_REPROJECT_DRM:
+      // reprojection context owns the swapchain; submitAndPresent() acquires it later
+      break;
+    case VkOutputMode::GFX_OFFSCREEN:
+      // no swapchain to acquire; main RTG is the sole render target
+      break;
+  }
+
   _ensureMainRtg().get();    // ensure main rtgroup is created
   _active_rtgroup = nullptr; // ensure main rtgroup is pushed on first use
 
@@ -99,33 +111,47 @@ void VkFrameBufferInterface::_doEndFrame() {
 ///////////////////////////////////////////////////////
 
 void VkFrameBufferInterface::querySwapchainSize(int& w, int& h) const {
-  if (_swapchain) {
-    w = _swapchain->_width;
-    h = _swapchain->_height;
-  }
+  switch (_mode) {
+    case VkOutputMode::GFX_PRESENT_SWAP:
+    case VkOutputMode::GFX_REPROJECT_SWAP:
+    case VkOutputMode::IPC_REPROJECT_SWAP:
+      w = _swapchain->_width;
+      h = _swapchain->_height;
+      break;
+    case VkOutputMode::GFX_PRESENT_DRM:
+    case VkOutputMode::GFX_REPROJECT_DRM:
+    case VkOutputMode::IPC_REPROJECT_DRM:
 #if defined(__linux__)
-  else if (_swapchain_drm) {
-    w = _swapchain_drm->_width;
-    h = _swapchain_drm->_height;
-  }
+      w = _swapchain_drm->_width;
+      h = _swapchain_drm->_height;
 #endif
-  else {
-    w = 0;
-    h = 0;
+      break;
+    case VkOutputMode::GFX_OFFSCREEN:
+      w = 0;
+      h = 0;
+      break;
   }
 }
 
 ///////////////////////////////////////////////////////
 
 void* VkFrameBufferInterface::querySwapchainPtr() const {
-  if (_swapchain) {
-    return (void*)_swapchain.get();
-  }
+  switch (_mode) {
+    case VkOutputMode::GFX_PRESENT_SWAP:
+    case VkOutputMode::GFX_REPROJECT_SWAP:
+    case VkOutputMode::IPC_REPROJECT_SWAP:
+      return (void*)_swapchain.get();
+    case VkOutputMode::GFX_PRESENT_DRM:
+    case VkOutputMode::GFX_REPROJECT_DRM:
+    case VkOutputMode::IPC_REPROJECT_DRM:
 #if defined(__linux__)
-  if (_swapchain_drm) {
-    return (void*)_swapchain_drm.get();
-  }
+      return (void*)_swapchain_drm.get();
 #endif
+      break;
+    case VkOutputMode::GFX_OFFSCREEN:
+      // no swapchain
+      break;
+  }
   return nullptr;
 }
 

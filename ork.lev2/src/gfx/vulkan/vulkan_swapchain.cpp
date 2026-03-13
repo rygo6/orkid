@@ -448,60 +448,45 @@ VkResult VkSwapChain::acquireImage(vkcontext_rawptr_t ctxVK) {
   // Get SwapChain Image
   ///////////////////////////////////////////////////
 
-  bool ok_to_transition = false;
+  _curSwapWriteImage = 0xffffffff;
+  
+  // DEBUG: Log semaphore state before acquire
+  auto semaphore = _imageAcquiredSemaphores[sub_index]->_vksema;
+  if(0)logchan_swapchain->log("acquireImage: attempting vkAcquireNextImageKHR with semaphore %p (sub_index %zu)", 
+                        (void*)semaphore, sub_index);
+  
+  VkResult status    = vkAcquireNextImageKHR(
+      ctxVK->_vkdevice,
+      _vkSwapChain,
+      std::numeric_limits<uint64_t>::max(),
+      semaphore, // Use current frame's semaphore
+      VK_NULL_HANDLE,
+      &_curSwapWriteImage);
 
-  while (not ok_to_transition) {
+  // DEBUG: Log acquire result
+  if(0)logchan_swapchain->log("acquireImage: vkAcquireNextImageKHR returned %d, image index %u", 
+                        status, _curSwapWriteImage);
 
-    // Ensure we're using the correct frame's semaphore
-    // and that any previous signal has been consumed
-    if (_curSwapWriteImage != 0xffffffff) {
-      // Previous acquire might have failed mid-operation
-      // Wait for device idle to ensure clean state
-      if(0)logchan_swapchain->log("acquireImage: previous acquire failed, waiting for device idle");
+  switch (status) {
+    case VK_SUCCESS:
+      if(0)logchan_swapchain->log("acquireImage: SUCCESS - acquired image %u", _curSwapWriteImage);
+      break;
+    case VK_SUBOPTIMAL_KHR:
+    case VK_ERROR_OUT_OF_DATE_KHR: {
+      logchan_swapchain->log("acquireImage: SWAPCHAIN OUT OF DATE - status %d", status);
       vkDeviceWaitIdle(ctxVK->_vkdevice);
+      return status;
+      break;
     }
-
-    _curSwapWriteImage = 0xffffffff;
-    
-    // DEBUG: Log semaphore state before acquire
-    auto semaphore = _imageAcquiredSemaphores[sub_index]->_vksema;
-    if(0)logchan_swapchain->log("acquireImage: attempting vkAcquireNextImageKHR with semaphore %p (sub_index %zu)", 
-                          (void*)semaphore, sub_index);
-    
-    VkResult status    = vkAcquireNextImageKHR(
-        ctxVK->_vkdevice,
-        _vkSwapChain,
-        std::numeric_limits<uint64_t>::max(),
-        semaphore, // Use current frame's semaphore
-        VK_NULL_HANDLE,
-        &_curSwapWriteImage);
-
-    // DEBUG: Log acquire result
-    if(0)logchan_swapchain->log("acquireImage: vkAcquireNextImageKHR returned %d, image index %u", 
-                          status, _curSwapWriteImage);
-
-    switch (status) {
-      case VK_SUCCESS:
-        ok_to_transition = true;
-        if(0)logchan_swapchain->log("acquireImage: SUCCESS - acquired image %u", _curSwapWriteImage);
-        break;
-      case VK_SUBOPTIMAL_KHR:
-      case VK_ERROR_OUT_OF_DATE_KHR: {
-        logchan_swapchain->log("acquireImage: SWAPCHAIN OUT OF DATE - status %d", status);
-        vkDeviceWaitIdle(ctxVK->_vkdevice);
-        return status;
-        break;
-      }
-      case VK_ERROR_DEVICE_LOST:{
-        logchan_swapchain->error("acquireImage: VK_ERROR_DEVICE_LOST");
-        OrkAssert(false);
-        break;
-      }
-      default:
-        logchan_swapchain->error("acquireImage: UNEXPECTED STATUS %d", status);
-        OrkAssert(false);
-        break;
+    case VK_ERROR_DEVICE_LOST:{
+      logchan_swapchain->error("acquireImage: VK_ERROR_DEVICE_LOST");
+      OrkAssert(false);
+      break;
     }
+    default:
+      logchan_swapchain->error("acquireImage: UNEXPECTED STATUS %d", status);
+      OrkAssert(false);
+      break;
   }
   OrkAssert(_curSwapWriteImage >= 0);
 

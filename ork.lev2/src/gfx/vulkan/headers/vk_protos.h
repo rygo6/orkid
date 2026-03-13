@@ -104,6 +104,7 @@ struct VulkanDescriptorSetCache;
 struct VkFrameBufferInterface;
 struct VulkanFenceObject;
 struct VulkanEventObject;
+struct VkReprojectionContext;
 struct VulkanSamplerObject;
 struct InFlightTextureTransfer;
 struct RtGroupAttachments;
@@ -125,8 +126,9 @@ using vkplatformobject_drm_ptr_t = std::shared_ptr<VkPlatformObjectDRM>;
 #endif
 using vertex_strconfig_item_ptr_t = std::shared_ptr<VertexStreamConfigItem>;
 using vertex_strconfig_ptr_t = std::shared_ptr<VertexStreamConfig>;
-using vkfence_obj_ptr_t = std::shared_ptr<VulkanFenceObject>;
-using vkevent_obj_ptr_t = std::shared_ptr<VulkanEventObject>;
+using vkfence_obj_ptr_t    = std::shared_ptr<VulkanFenceObject>;
+using vkevent_obj_ptr_t    = std::shared_ptr<VulkanEventObject>;
+using vkreprojctx_ptr_t    = std::shared_ptr<VkReprojectionContext>;
 ///////////////////////////////////////////////////////////////////////////////
 using vkfxdescsetitem_ptr_t = std::shared_ptr<VkFxShaderDescriptorSetItem>;
 using vkfxsunisetsref_ptr_t = std::shared_ptr<VkFxShaderUniformSetsReference>;

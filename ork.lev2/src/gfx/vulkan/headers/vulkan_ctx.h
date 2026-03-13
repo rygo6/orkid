@@ -240,6 +240,52 @@ struct VkRtgStackItemImpl {
   RtGroup* _previous_rtgroup = nullptr; // The RTGroup that was active before this push
 };
 ///////////////////////////////////////////////////////////////////////////////
+
+enum class VkOutputMode {
+  GFX_PRESENT_SWAP,   // GFX presents directly to GLFW swapchain
+  GFX_PRESENT_DRM,    // GFX presents directly to DRM
+  GFX_REPROJECT_SWAP, // GFX offscreen → in-process reproject → GLFW swapchain
+  GFX_REPROJECT_DRM,  // GFX offscreen → in-process reproject → DRM
+  IPC_REPROJECT_SWAP, // frames over IPC → reproject → GLFW swapchain
+  IPC_REPROJECT_DRM,  // frames over IPC → reproject → DRM
+  GFX_OFFSCREEN,      // no presentation target; render to RTG only (pbuffer / loader / headless)
+};
+
+///////////////////////////////////////////////////////////////////////////////
+
+struct VkReprojectionContext {
+
+  VkReprojectionContext(vkcontext_rawptr_t ctxVK, VkOutputMode mode);
+  ~VkReprojectionContext();
+
+  void _buildup();
+  void _teardown();
+
+  void submitAndPresent(vkcontext_rawptr_t ctxVK);
+  void setReprojectionMatrices(const fmtx4& prev_view, const fmtx4& curr_view, const fmtx4& proj);
+
+  vkcontext_rawptr_t _contextVK = nullptr;
+  VkOutputMode _mode            = VkOutputMode::GFX_PRESENT_SWAP;
+
+  vkswapchain_ptr_t _swapchain;
+#if defined(__linux__)
+  vkswapchaindrm_ptr_t _swapchain_drm;
+#endif
+
+  vkbinarysemaphore_ptr_t _gfxRenderComplete;
+
+  static constexpr size_t MAX_FRAMES_IN_FLIGHT = 2;
+  std::vector<vkfence_obj_ptr_t> _frameFences;
+  size_t _currentFrame = 0;
+
+  fmtx4 _prevViewMatrix;
+  fmtx4 _currViewMatrix;
+  fmtx4 _projMatrix;
+  std::mutex _matrixMutex;
+};
+
+///////////////////////////////////////////////////////////////////////////////
+
 struct VkFrameBufferInterface final : public FrameBufferInterface {
 
   VkFrameBufferInterface(vkcontext_rawptr_t ctx);
@@ -301,11 +347,13 @@ struct VkFrameBufferInterface final : public FrameBufferInterface {
 
   //////////////////////////////////////////////
 
+  VkOutputMode _mode = VkOutputMode::GFX_PRESENT_SWAP;
   vkswapchain_ptr_t _swapchain;
   std::unordered_set<vkswapchain_ptr_t> _old_swapchains;
 #if defined(__linux__)
   vkswapchaindrm_ptr_t _swapchain_drm;
 #endif
+  vkreprojctx_ptr_t _reprojection_ctx;
 };
 ///////////////////////////////////////////////////////////////////////////////
 struct VkTextureInterface final : public TextureInterface {

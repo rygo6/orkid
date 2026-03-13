@@ -778,150 +778,179 @@ void VkContext::_doEndPrimaryCommandBuffer() {
 
 void VkContext::_doSubmitPrimaryCommandBuffer(){
 
-  auto swapchain = _fbi->_swapchain;
-#if defined(__linux__)
-  auto swapchain_drm = _fbi->_swapchain_drm;
-#else
-  decltype(_fbi->_swapchain) swapchain_drm = nullptr;
-#endif
+  switch (_fbi->_mode) {
 
-  if (swapchain) {
-    // Onscreen rendering with GLFW swapchain
-    bool semas_empty = false;
-    _pendingOneShotSemas.atomicOp([&](vkcompsema_set_t& unlocked) {
-      semas_empty = unlocked.empty();
-    });
+    ////////////////////////////////////////
+    // Reprojection modes
+    ////////////////////////////////////////
 
-    // Associate frame fence with pending captures
-    size_t sub_index = swapchain->subIndex();
-    if (sub_index < swapchain->_frameFences.size() && !_pending_captures.empty()) {
-      auto frame_fence = swapchain->_frameFences[sub_index];
-      for (auto& capture : _pending_captures) {
-        if (auto async_impl = capture->_impl.getShared<VkCaptureAsyncImpl>()) {
-          async_impl->_fence = frame_fence;
-        }
-      }
-    }
+    case VkOutputMode::GFX_REPROJECT_SWAP:
+      OrkAssertI(false, "VkOutputMode:: GFX_REPROJECT_SWAP not implemented!");
+    case VkOutputMode::GFX_REPROJECT_DRM:
+      OrkAssertI(false, "VkOutputMode:: GFX_REPROJECT_DRM not implemented!");
+    case VkOutputMode::IPC_REPROJECT_SWAP:
+      OrkAssertI(false, "VkOutputMode:: IPC_REPROJECT_SWAP not implemented!");
+    case VkOutputMode::IPC_REPROJECT_DRM:
+      OrkAssertI(false, "VkOutputMode:: IPC_REPROJECT_DRM not implemented!");
 
-    // Submit
-    if ( not semas_empty) {
-      OrkProfilerSampleScope(CHANNEL_MAIN, "vk:submit_semaphores");
-      // Submit with timeline semaphores
-      swapchain->_submitFrameWithSemaphores(this);
-    } else {
-      OrkProfilerSampleScope(CHANNEL_MAIN, "vk:enqueue_frame");
-      // Normal submission
-      swapchain->enqueueFrame(this);
-    }
+    ////////////////////////////////////////
+    // GFX Present Swapchain
+    ////////////////////////////////////////
 
-    ///////////////////////////////////////////////////////
-    // Present !
-    ///////////////////////////////////////////////////////
-    {
-      OrkProfilerSampleScope(CHANNEL_MAIN, "vk:present");
-      swapchain->enqueuePresentFrame(this);
-      swapchain->waitPresentFrame(this);
-    }
-
-    // Process pending captures after swapchain frame completion
-    _processPendingCaptures();
-  } else if (swapchain_drm) {
-#if defined(__linux__)
-    // Onscreen rendering with DRM swapchain
-    bool semas_empty = false;
-    _pendingOneShotSemas.atomicOp([&](vkcompsema_set_t& unlocked) {
-      semas_empty = unlocked.empty();
-    });
-
-    // Associate frame fence with pending captures
-    size_t sub_index = swapchain_drm->subIndex();
-    if (sub_index < swapchain_drm->_frameFences.size() && !_pending_captures.empty()) {
-      auto frame_fence = swapchain_drm->_frameFences[sub_index];
-      for (auto& capture : _pending_captures) {
-        if (auto async_impl = capture->_impl.getShared<VkCaptureAsyncImpl>()) {
-          async_impl->_fence = frame_fence;
-        }
-      }
-    }
-
-    if ( not semas_empty) {
-      // Submit with timeline semaphores (DRM doesn't support _submitFrameWithSemaphores yet, fallback to normal)
-      swapchain_drm->enqueueFrame(this);
-    } else {
-      // Normal submission
-      swapchain_drm->enqueueFrame(this);
-    }
-
-    ///////////////////////////////////////////////////////
-    // Present (DRM page flip) !
-    ///////////////////////////////////////////////////////
-
-    swapchain_drm->waitPresentFrame(this);
-
-    // Process pending captures after swapchain frame completion
-    _processPendingCaptures();
-#endif
-  } else {
-    // Offscreen rendering - handle completion semaphores
-    bool semas_empty = false;
-    _pendingOneShotSemas.atomicOp([&](vkcompsema_set_t& unlocked) {
-      semas_empty = unlocked.empty();
-    });
-
-    VkSubmitInfo SI = {};
-    initializeVkStruct(SI, VK_STRUCTURE_TYPE_SUBMIT_INFO);
-    SI.commandBufferCount = 1;
-    SI.pCommandBuffers = &_cmdbufcurpri_gfx->_vkcmdbuf;
-
-    // Handle timeline semaphores for texture uploads, etc.
-    VkTimelineSemaphoreSubmitInfo timelineInfo{};
-
-    if (!semas_empty) {
-      // Clear and populate vectors (reuse storage)
-      _offscreen_signalSemaphores.clear();
-      _offscreen_signalValues.clear();
-
+    case VkOutputMode::GFX_PRESENT_SWAP: {
+      auto swapchain   = _fbi->_swapchain;
+      bool semas_empty = false;
       _pendingOneShotSemas.atomicOp([&](vkcompsema_set_t& unlocked) {
-        for (auto semaphore : unlocked) {
-          _offscreen_signalSemaphores.push_back(semaphore->_vksema);
-          _offscreen_signalValues.push_back(1);  // Signal to value 1
-        }
+        semas_empty = unlocked.empty();
       });
 
-      // Set up timeline semaphore info
-      timelineInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-      timelineInfo.signalSemaphoreValueCount = _offscreen_signalValues.size();
-      timelineInfo.pSignalSemaphoreValues = _offscreen_signalValues.data();
-
-      SI.pNext = &timelineInfo;
-      SI.signalSemaphoreCount = _offscreen_signalSemaphores.size();
-      SI.pSignalSemaphores = _offscreen_signalSemaphores.data();
-    }
-
-    // Create fence for captures if needed
-    vkfence_obj_ptr_t capture_fence;
-    if (!_pending_captures.empty()) {
-      capture_fence = std::make_shared<VulkanFenceObject>(this);
-      capture_fence->reset(); // Start unsignaled
-
-      // Associate fence with pending captures
-      for (auto& capture : _pending_captures) {
-        if (auto async_impl = capture->_impl.getShared<VkCaptureAsyncImpl>()) {
-          async_impl->_fence = capture_fence;
+    // Associate frame fence with pending captures
+      size_t sub_index = swapchain->subIndex();
+      if (sub_index < swapchain->_frameFences.size() && !_pending_captures.empty()) {
+        auto frame_fence = swapchain->_frameFences[sub_index];
+        for (auto& capture : _pending_captures) {
+          if (auto async_impl = capture->_impl.getShared<VkCaptureAsyncImpl>()) {
+              async_impl->_fence = frame_fence;
+          }
         }
       }
 
-      vkQueueSubmit(_vkqueue_graphics, 1, &SI, capture_fence->_vkfence);
-      capture_fence->wait(); // Wait for fence to be signaled
-    } else {
-      vkQueueSubmit(_vkqueue_graphics, 1, &SI, VK_NULL_HANDLE);
-      vkQueueWaitIdle(_vkqueue_graphics); // TODO get rid of!
+      // Submit
+      if ( not semas_empty) {
+        OrkProfilerSampleScope(CHANNEL_MAIN, "vk:submit_semaphores");
+        // Submit with timeline semaphores
+        swapchain->_submitFrameWithSemaphores(this);
+      } else {
+        OrkProfilerSampleScope(CHANNEL_MAIN, "vk:enqueue_frame");
+        // Normal submission
+        swapchain->enqueueFrame(this);
+      }
+
+      // Present
+      {
+        OrkProfilerSampleScope(CHANNEL_MAIN, "vk:present");
+        swapchain->enqueuePresentFrame(this);
+        swapchain->waitPresentFrame(this);
+      }
+
+    // Process pending captures after swapchain frame completion
+      _processPendingCaptures();
+      break;
     }
+
+    ////////////////////////////////////////
+    // GXF Present DRM
+    ////////////////////////////////////////
+
+    case VkOutputMode::GFX_PRESENT_DRM: {
+#if defined(__linux__)
+      auto swapchain_drm = _fbi->_swapchain_drm;
+      // Onscreen rendering with DRM swapchain
+      bool semas_empty = false;
+      _pendingOneShotSemas.atomicOp([&](vkcompsema_set_t& unlocked) {
+        semas_empty = unlocked.empty();
+      });
+
+      // Associate frame fence with pending captures
+      size_t sub_index = swapchain_drm->subIndex();
+      if (sub_index < swapchain_drm->_frameFences.size() && !_pending_captures.empty()) {
+        auto frame_fence = swapchain_drm->_frameFences[sub_index];
+        for (auto& capture : _pending_captures) {
+          if (auto async_impl = capture->_impl.getShared<VkCaptureAsyncImpl>()) {
+              async_impl->_fence = frame_fence;
+          }
+        }
+      }
+
+      // Submit
+      if (not semas_empty) {
+        // Submit with timeline semaphores (DRM doesn't support _submitFrameWithSemaphores yet, fallback to normal)
+        swapchain_drm->enqueueFrame(this);
+      } else {
+        // Normal submission
+        swapchain_drm->enqueueFrame(this);
+      }
+
+      ///////////////////////////////////////////////////////
+      // Present (DRM page flip) !
+      ///////////////////////////////////////////////////////
+
+      swapchain_drm->waitPresentFrame(this);
+
+      // Process pending captures after swapchain frame completion
+      _processPendingCaptures();
+#endif
+      break;
+    }
+
+    ////////////////////////////////////////
+    // Offscreen (no presentation target)
+    ////////////////////////////////////////
+
+    case VkOutputMode::GFX_OFFSCREEN: {
+      bool semas_empty = false;
+      _pendingOneShotSemas.atomicOp([&](vkcompsema_set_t& unlocked) {
+        semas_empty = unlocked.empty();
+      });
+
+      VkSubmitInfo SI = {};
+      initializeVkStruct(SI, VK_STRUCTURE_TYPE_SUBMIT_INFO);
+      SI.commandBufferCount = 1;
+      SI.pCommandBuffers = &_cmdbufcurpri_gfx->_vkcmdbuf;
+
+      // Handle timeline semaphores for texture uploads, etc.
+      VkTimelineSemaphoreSubmitInfo timelineInfo{};
+
+     if (!semas_empty) {
+      // Clear and populate vectors (reuse storage)
+        _offscreen_signalSemaphores.clear();
+        _offscreen_signalValues.clear();
+
+        _pendingOneShotSemas.atomicOp([&](vkcompsema_set_t& unlocked) {
+          for (auto semaphore : unlocked) {
+            _offscreen_signalSemaphores.push_back(semaphore->_vksema);
+            _offscreen_signalValues.push_back(1);  // Signal to value 1
+          }
+        });
+
+       // Set up timeline semaphore info
+        timelineInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+        timelineInfo.signalSemaphoreValueCount = _offscreen_signalValues.size();
+        timelineInfo.pSignalSemaphoreValues    = _offscreen_signalValues.data();
+        SI.pNext                = &timelineInfo;
+        SI.signalSemaphoreCount = _offscreen_signalSemaphores.size();
+        SI.pSignalSemaphores    = _offscreen_signalSemaphores.data();
+      }
+
+      vkfence_obj_ptr_t capture_fence;
+      if (!_pending_captures.empty()) {
+        capture_fence = std::make_shared<VulkanFenceObject>(this);
+        capture_fence->reset(); // Start unsignaled
+
+        // Associate fence with pending captures
+        for (auto& capture : _pending_captures) {
+          if (auto async_impl = capture->_impl.getShared<VkCaptureAsyncImpl>()) {
+              async_impl->_fence = capture_fence;
+          }
+        }
+
+        vkQueueSubmit(_vkqueue_graphics, 1, &SI, capture_fence->_vkfence);
+        capture_fence->wait(); // Wait for fence to be signaled
+      } else {
+        vkQueueSubmit(_vkqueue_graphics, 1, &SI, VK_NULL_HANDLE);
+        vkQueueWaitIdle(_vkqueue_graphics); // TODO get rid of!
+      }
 
     if(0)logchan_vkctx->log("Offscreen frame submitted");
 
     // Process pending captures after offscreen frame completion
-    _processPendingCaptures();
+      _processPendingCaptures();
+      break;
+    }
+
+    default:
+      OrkAssert(false); // unhandled VkOutputMode
+      break;
   }
 }
 
@@ -1166,7 +1195,7 @@ void VkContext::_doEndFrame() {
     _cmdbufcurpri_gfx->_secondary_cmdbuffers_pending_cleanup.size());
 
   ////////////////////////
-  // Append secondary command buffers to pending cleanupπ
+  // Append secondary command buffers to pending cleanup
   // They will be destroyed when this primary CB is reallocated and reset
   // (3 frames later due to pool size 3 in practice)
   ////////////////////////
@@ -1374,11 +1403,11 @@ void VkContext::initializeWindowContext(
 
   if (is_drm) {
 #if defined(__linux__)
-    // Create DRM swapchain
     auto drm_plato = _impl.getShared<VkPlatformObjectDRM>();
     _fbi->_swapchain_drm = std::make_shared<VkSwapChainDRM>(this, drm_plato->_drmctx);
     _fbi->_swapchain_drm->_buildup();
-    _fbi->_swapchain = nullptr;  // No traditional swapchain for DRM
+    _fbi->_swapchain = nullptr;
+    _fbi->_mode = VkOutputMode::GFX_PRESENT_DRM;
     logchan_vkctx->log("DRM swapchain created");
 #endif
   } else if (!is_offscreen && _vkpresentation_caps) {
@@ -1392,8 +1421,9 @@ void VkContext::initializeWindowContext(
 
     _fbi->_swapchain = std::make_shared<VkSwapChain>(this);
 #if defined(__linux__)
-    _fbi->_swapchain_drm = nullptr;  // No DRM swapchain for GLFW
+    _fbi->_swapchain_drm = nullptr;
 #endif
+    _fbi->_mode = VkOutputMode::GFX_PRESENT_SWAP;
     logchan_vkctx->log("Swapchain created for onscreen rendering");
   } else {
     // For offscreen, we'll render to framebuffer objects instead
@@ -1401,6 +1431,7 @@ void VkContext::initializeWindowContext(
 #if defined(__linux__)
     _fbi->_swapchain_drm = nullptr;
 #endif
+    _fbi->_mode = VkOutputMode::GFX_OFFSCREEN;
     logchan_vkctx->log("Offscreen mode: no swapchain created");
   }
 
@@ -1422,6 +1453,7 @@ void VkContext::initializeOffscreenContext(DisplayBuffer* pbuffer) {
   _impl.setShared<VkPlatformObject>(plato);
   ///////////////////////
   _initVulkanForOffscreen(pbuffer);
+  _fbi->_mode = VkOutputMode::GFX_OFFSCREEN;
   ///////////////////////
   platoMakeCurrent(plato);
   _fbi->SetThisBuffer(pbuffer);
@@ -1537,6 +1569,7 @@ void VkContext::initializeLoaderContext() {
     glfwDestroyWindow(temp_window);
   }
 
+  _fbi->_mode  = VkOutputMode::GFX_OFFSCREEN;
   _defaultRTG  = new RtGroup(this, miW, miH, MsaaSamples::MSAA_1X);
   auto rtb     = _defaultRTG->createRenderTarget(EBufferFormat::RGBA8);
   auto texture = rtb->texture();
