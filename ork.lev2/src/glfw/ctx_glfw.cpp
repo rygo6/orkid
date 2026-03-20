@@ -919,6 +919,13 @@ CtxGLFW* CtxGLFW::globalOffscreenContext() {
     }
     logchan_glfw->log("GLFW platform: %s", platform_name);
 
+    // On NULL platform (headless, no display server), force offscreen mode
+    // so all downstream _offscreen checks correctly route to offscreen rendering
+    if (platform == GLFW_PLATFORM_NULL && _ginitdata) {
+      logchan_glfw->log("NULL platform: forcing offscreen mode");
+      _ginitdata->_offscreen = true;
+    }
+
     auto primary_monitor = glfwGetPrimaryMonitor();
     if (primary_monitor) {
       const GLFWvidmode* mode = glfwGetVideoMode(primary_monitor);
